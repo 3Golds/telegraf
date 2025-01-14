@@ -1,138 +1,126 @@
+# ![tiger](assets/TelegrafTigerSmall.png "tiger") Telegraf
 
-# Telegraf
+[![GoDoc](https://img.shields.io/badge/doc-reference-00ADD8.svg?logo=go)](https://godoc.org/github.com/influxdata/telegraf)
+[![Docker pulls](https://img.shields.io/docker/pulls/library/telegraf.svg)](https://hub.docker.com/_/telegraf/)
+[![Go Report Card](https://goreportcard.com/badge/github.com/influxdata/telegraf)](https://goreportcard.com/report/github.com/influxdata/telegraf)
+[![Circle CI](https://circleci.com/gh/influxdata/telegraf.svg?style=svg)](https://circleci.com/gh/influxdata/telegraf)
 
-![tiger](TelegrafTiger.png "tiger")
+Telegraf is an agent for collecting, processing, aggregating, and writing
+metrics, logs, and other arbitrary data.
 
-[![Circle CI](https://circleci.com/gh/influxdata/telegraf.svg?style=svg)](https://circleci.com/gh/influxdata/telegraf) [![Docker pulls](https://img.shields.io/docker/pulls/library/telegraf.svg)](https://hub.docker.com/_/telegraf/) [![Total alerts](https://img.shields.io/lgtm/alerts/g/influxdata/telegraf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/influxdata/telegraf/alerts/)
-[![Slack Status](https://img.shields.io/badge/slack-join_chat-white.svg?logo=slack&style=social)](https://www.influxdata.com/slack)
+* Offers a comprehensive suite of over 300 plugins, covering a wide range of
+  functionalities including system monitoring, cloud services, and message
+  passing
+* Enables the integration of user-defined code to collect, transform, and
+  transmit data efficiently
+* Compiles into a standalone static binary without any external dependencies,
+  ensuring a streamlined deployment process
+* Utilizes TOML for configuration, providing a user-friendly and unambiguous
+  setup experience
+* Developed with contributions from a diverse community of over 1,200
+  contributors
 
-Telegraf is an agent for collecting, processing, aggregating, and writing metrics.
+Users can choose plugins from a wide range of topics, including but not limited
+to:
 
-Design goal:
-- Have a minimal memory footprint with a plugin system so that developers in the community can easily add support for collecting metrics.
+* Devices: [OPC UA][], [Modbus][]
+* Logs: [File][], [Tail][], [Directory Monitor][]
+* Messaging: [AMQP][], [Kafka][], [MQTT][]
+* Monitoring: [OpenTelemetry][], [Prometheus][]
+* Networking: [Cisco TelemetryMDT][], [gNMI][]
+* System monitoring: [CPU][], [Memory][], [Disk][], [Network][], [SMART][],
+  [Docker][], [Nvidia SMI][], etc.
+* Universal: [Exec][], [HTTP][], [HTTP Listener][], [SNMP][], [SQL][]
+* Windows: [Event Log][], [Management Instrumentation][],
+  [Performance Counters][]
 
-Telegraf is plugin-driven and has the concept of 4 distinct plugin types:
+## 🔨 Installation
 
-1. [Input Plugins](/docs/INPUTS.md) collect metrics from the system, services, or 3rd party APIs
-2. [Processor Plugins](/docs/PROCESSORS.md) transform, decorate, and/or filter metrics
-3. [Aggregator Plugins](/docs/AGGREGATORS.md) create aggregate metrics (e.g. mean, min, max, quantiles, etc.)
-4. [Output Plugins](/docs/OUTPUTS.md) write metrics to various destinations
+For binary builds, Docker images, RPM & DEB packages, and other builds of
+Telegraf, please see the [install guide](/docs/INSTALL_GUIDE.md).
 
-New plugins are designed to be easy to contribute, pull requests are welcomed and we work to incorporate as many pull requests as possible. If none of the internal plugins fit your needs, you could have a look at the
-[list of external plugins](EXTERNAL_PLUGINS.md).
+See the [releases documentation](/docs/RELEASES.md) for details on versioning
+and when releases are made.
 
-## Minimum Requirements
+## 💻 Usage
 
-Telegraf shares the same [minimum requirements][] as Go:
-- Linux kernel version 2.6.23 or later
-- Windows 7 or later
-- FreeBSD 11.2 or later
-- MacOS 10.11 El Capitan or later
+Users define a TOML configuration with the plugins and settings they wish to
+use, then pass that configuration to Telegraf. The Telegraf agent then
+collects data from inputs at each interval and sends data to outputs at each
+flush interval.
 
-[minimum requirements]: https://github.com/golang/go/wiki/MinimumRequirements#minimum-requirements
+For a basic walkthrough see [quick start](/docs/QUICK_START.md).
 
-## Installation:
+## 📖 Documentation
 
-You can download the binaries directly from the [downloads](https://www.influxdata.com/downloads) page
-or from the [releases](https://github.com/influxdata/telegraf/releases) section.
+For a full list of documentation including tutorials, reference and other
+material, start with the [/docs directory](/docs/README.md).
 
-### Ansible Role:
+Additionally, each plugin has its own README that includes details about how to
+configure, use, and sometimes debug or troubleshoot. Look under the
+[/plugins directory](/plugins/) for specific plugins.
 
-Ansible role: https://github.com/rossmcdonald/telegraf
+Here are some commonly used documents:
 
-### From Source:
+* [Changelog](/CHANGELOG.md)
+* [Configuration](/docs/CONFIGURATION.md)
+* [FAQ](/docs/FAQ.md)
+* [Releases](https://github.com/influxdata/telegraf/releases)
+* [Security](/SECURITY.md)
 
-Telegraf requires Go version 1.14 or newer, the Makefile requires GNU make.
+## ❤️ Contribute
 
-1. [Install Go](https://golang.org/doc/install) >=1.14 (1.15 recommended)
-2. Clone the Telegraf repository:
-   ```
-   cd ~/src
-   git clone https://github.com/influxdata/telegraf.git
-   ```
-3. Run `make` from the source directory
-   ```
-   cd ~/src/telegraf
-   make
-   ```
+[![Contribute](https://img.shields.io/badge/contribute-to_telegraf-blue.svg?logo=influxdb)](https://github.com/influxdata/telegraf/blob/master/CONTRIBUTING.md)
 
-### Changelog
+We love our community of over 1,200 contributors! Many of the plugins included
+in Telegraf were originally contributed by community members. Check out
+our [contributing guide](CONTRIBUTING.md) if you are interested in helping out.
+Also, join us on our [Community Slack](https://influxdata.com/slack) or
+[Community Forums](https://community.influxdata.com/) if you have questions or
+comments for our engineering teams.
 
-View the [changelog](/CHANGELOG.md) for the latest updates and changes by
-version.
+If you are completely new to Telegraf and InfluxDB, you can also enroll for free
+at [InfluxDB university](https://www.influxdata.com/university/) to take courses
+to learn more.
 
-### Nightly Builds
+## ℹ️ Support
 
-[Nightly](/docs/NIGHTLIES.md) builds are available, generated from the master branch.
+[![Slack](https://img.shields.io/badge/slack-join_chat-blue.svg?logo=slack)](https://www.influxdata.com/slack)
+[![Forums](https://img.shields.io/badge/discourse-join_forums-blue.svg?logo=discourse)](https://community.influxdata.com/)
 
-### 3rd Party Builds
+Please use the [Community Slack](https://influxdata.com/slack) or
+[Community Forums](https://community.influxdata.com/) if you have questions or
+comments for our engineering teams. GitHub issues are limited to actual issues
+and feature requests only.
 
-Builds for other platforms or package formats are provided by members of the Telegraf community. These packages are not built, tested or supported by the Telegraf project or InfluxData, we make no guarantees that they will work. Please get in touch with the package author if you need support.
+## 📜 License
 
-* Windows
-  * [Chocolatey](https://chocolatey.org/packages/telegraf) by [ripclawffb](https://chocolatey.org/profiles/ripclawffb)
-  * [Scoop](https://github.com/ScoopInstaller/Main/blob/master/bucket/telegraf.json)
-* Linux
-  * [Snap](https://snapcraft.io/telegraf) by Laurent Sesquès (sajoupa)
+[![MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/influxdata/telegraf/blob/master/LICENSE)
 
-## How to use it:
-
-See usage with:
-
-```
-telegraf --help
-```
-
-#### Generate a telegraf config file:
-
-```
-telegraf config > telegraf.conf
-```
-
-#### Generate config with only cpu input & influxdb output plugins defined:
-
-```
-telegraf --section-filter agent:inputs:outputs --input-filter cpu --output-filter influxdb config
-```
-
-#### Run a single telegraf collection, outputting metrics to stdout:
-
-```
-telegraf --config telegraf.conf --test
-```
-
-#### Run telegraf with all plugins defined in config file:
-
-```
-telegraf --config telegraf.conf
-```
-
-#### Run telegraf, enabling the cpu & memory input, and influxdb output plugins:
-
-```
-telegraf --config telegraf.conf --input-filter cpu:mem --output-filter influxdb
-```
-
-## Documentation
-
-[Latest Release Documentation][release docs].
-
-For documentation on the latest development code see the [documentation index](/docs).
-
-[release docs]: https://docs.influxdata.com/telegraf
-[developer docs]: docs
-- [Input Plugins](/docs/INPUTS.md)
-- [Output Plugins](/docs/OUTPUTS.md)
-- [Processor Plugins](/docs/PROCESSORS.md)
-- [Aggregator Plugins](/docs/AGGREGATORS.md)
-
-
-## Contributing
-
-There are many ways to contribute:
-- Fix and [report bugs](https://github.com/influxdata/telegraf/issues/new)
-- [Improve documentation](https://github.com/influxdata/telegraf/issues?q=is%3Aopen+label%3Adocumentation)
-- [Review code and feature proposals](https://github.com/influxdata/telegraf/pulls)
-- Answer questions and discuss here on github and on the [Community Site](https://community.influxdata.com/)
-- [Contribute plugins](CONTRIBUTING.md)
-- [Contribute external plugins](docs/EXTERNAL_PLUGINS.md)
+[OPC UA]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/opcua
+[Modbus]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/modbus
+[File]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/file
+[Tail]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/tail
+[Directory Monitor]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/directory_monitor
+[AMQP]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/amqp_consumer
+[Kafka]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/kafka_consumer
+[MQTT]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/mqtt_consumer
+[OpenTelemetry]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/opentelemetry
+[Prometheus]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/prometheus
+[Cisco TelemetryMDT]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/cisco_telemetry_mdt
+[gNMI]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/gnmi
+[CPU]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/cpu
+[Memory]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/mem
+[Disk]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/disk
+[Network]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/net
+[SMART]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/smartctl
+[Docker]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/docker
+[Nvidia SMI]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/nvidia_smi
+[Exec]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/exec
+[HTTP]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/http
+[HTTP Listener]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/http_listener_v2
+[SNMP]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/snmp
+[SQL]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/sql
+[Event Log]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/win_eventlog
+[Management Instrumentation]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/win_wmi
+[Performance Counters]: https://github.com/influxdata/telegraf/tree/master/plugins/inputs/win_perf_counters

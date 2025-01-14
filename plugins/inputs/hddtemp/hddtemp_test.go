@@ -3,16 +3,16 @@ package hddtemp
 import (
 	"testing"
 
-	hddtemp "github.com/influxdata/telegraf/plugins/inputs/hddtemp/go-hddtemp"
-	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/plugins/inputs/hddtemp/go-hddtemp"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 type mockFetcher struct {
 }
 
-func (h *mockFetcher) Fetch(_ string) ([]hddtemp.Disk, error) {
+func (*mockFetcher) Fetch(string) ([]hddtemp.Disk, error) {
 	return []hddtemp.Disk{
 		{
 			DeviceName:  "Disk1",
@@ -28,22 +28,23 @@ func (h *mockFetcher) Fetch(_ string) ([]hddtemp.Disk, error) {
 		},
 	}, nil
 }
+
 func newMockFetcher() *mockFetcher {
 	return &mockFetcher{}
 }
 
 func TestFetch(t *testing.T) {
-	hddtemp := &HDDTemp{
+	hddTemp := &HDDTemp{
 		fetcher: newMockFetcher(),
 		Address: "localhost",
 		Devices: []string{"*"},
 	}
 
 	acc := &testutil.Accumulator{}
-	err := hddtemp.Gather(acc)
+	err := hddTemp.Gather(acc)
 
 	require.NoError(t, err)
-	assert.Equal(t, acc.NFields(), 2)
+	require.Equal(t, 2, acc.NFields())
 
 	var tests = []struct {
 		fields map[string]interface{}

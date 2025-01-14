@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/influxdata/telegraf"
-
 	"gopkg.in/gorethink/gorethink.v3"
+
+	"github.com/influxdata/telegraf"
 )
 
 type Server struct {
@@ -22,23 +22,23 @@ type Server struct {
 
 func (s *Server) gatherData(acc telegraf.Accumulator) error {
 	if err := s.getServerStatus(); err != nil {
-		return fmt.Errorf("failed to get server_status, %s", err)
+		return fmt.Errorf("failed to get server_status: %w", err)
 	}
 
 	if err := s.validateVersion(); err != nil {
-		return fmt.Errorf("failed version validation, %s", err.Error())
+		return fmt.Errorf("failed version validation: %w", err)
 	}
 
 	if err := s.addClusterStats(acc); err != nil {
-		return fmt.Errorf("error adding cluster stats, %s", err.Error())
+		return fmt.Errorf("error adding cluster stats: %w", err)
 	}
 
 	if err := s.addMemberStats(acc); err != nil {
-		return fmt.Errorf("error adding member stats, %s", err.Error())
+		return fmt.Errorf("error adding member stats: %w", err)
 	}
 
-	if err := s.addTableStats(acc); err != nil {
-		return fmt.Errorf("error adding table stats, %s", err.Error())
+	if err := s.addTablesStats(acc); err != nil {
+		return fmt.Errorf("error adding table stats: %w", err)
 	}
 
 	return nil
@@ -49,7 +49,7 @@ func (s *Server) validateVersion() error {
 		return errors.New("could not determine the RethinkDB server version: process.version key missing")
 	}
 
-	versionRegexp := regexp.MustCompile("\\d.\\d.\\d")
+	versionRegexp := regexp.MustCompile(`\d.\d.\d`)
 	versionString := versionRegexp.FindString(s.serverStatus.Process.Version)
 	if versionString == "" {
 		return fmt.Errorf("could not determine the RethinkDB server version: malformed version string (%v)", s.serverStatus.Process.Version)
@@ -81,7 +81,10 @@ func (s *Server) getServerStatus() error {
 	if err != nil {
 		return fmt.Errorf("unable to determine provided hostname from %s", s.URL.Host)
 	}
-	driverPort, _ := strconv.Atoi(port)
+	driverPort, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("unable to parse port from %s: %w", port, err)
+	}
 	for _, ss := range serverStatuses {
 		for _, address := range ss.Network.Addresses {
 			if address.Host == host && ss.Network.DriverPort == driverPort {
@@ -112,12 +115,12 @@ var ClusterTracking = []string{
 func (s *Server) addClusterStats(acc telegraf.Accumulator) error {
 	cursor, err := gorethink.DB("rethinkdb").Table("stats").Get([]string{"cluster"}).Run(s.session)
 	if err != nil {
-		return fmt.Errorf("cluster stats query error, %s", err.Error())
+		return fmt.Errorf("cluster stats query error: %w", err)
 	}
 	defer cursor.Close()
 	var clusterStats stats
 	if err := cursor.One(&clusterStats); err != nil {
-		return fmt.Errorf("failure to parse cluster stats, %s", err.Error())
+		return fmt.Errorf("failure to parse cluster stats: %w", err)
 	}
 
 	tags := s.getDefaultTags()
@@ -140,12 +143,12 @@ var MemberTracking = []string{
 func (s *Server) addMemberStats(acc telegraf.Accumulator) error {
 	cursor, err := gorethink.DB("rethinkdb").Table("stats").Get([]string{"server", s.serverStatus.ID}).Run(s.session)
 	if err != nil {
-		return fmt.Errorf("member stats query error, %s", err.Error())
+		return fmt.Errorf("member stats query error: %w", err)
 	}
 	defer cursor.Close()
 	var memberStats stats
 	if err := cursor.One(&memberStats); err != nil {
-		return fmt.Errorf("failure to parse member stats, %s", err.Error())
+		return fmt.Errorf("failure to parse member stats: %w", err)
 	}
 
 	tags := s.getDefaultTags()
@@ -161,10 +164,10 @@ var TableTracking = []string{
 	"total_writes",
 }
 
-func (s *Server) addTableStats(acc telegraf.Accumulator) error {
+func (s *Server) addTablesStats(acc telegraf.Accumulator) error {
 	tablesCursor, err := gorethink.DB("rethinkdb").Table("table_status").Run(s.session)
 	if err != nil {
-		return fmt.Errorf("table stats query error, %s", err.Error())
+		return fmt.Errorf("table stats query error: %w", err)
 	}
 
 	defer tablesCursor.Close()
@@ -174,23 +177,33 @@ func (s *Server) addTableStats(acc telegraf.Accumulator) error {
 		return errors.New("could not parse table_status results")
 	}
 	for _, table := range tables {
-		cursor, err := gorethink.DB("rethinkdb").Table("stats").
-			Get([]string{"table_server", table.ID, s.serverStatus.ID}).
-			Run(s.session)
+		err = s.addTableStats(acc, table)
 		if err != nil {
-			return fmt.Errorf("table stats query error, %s", err.Error())
+			return err
 		}
-		defer cursor.Close()
-		var ts tableStats
-		if err := cursor.One(&ts); err != nil {
-			return fmt.Errorf("failure to parse table stats, %s", err.Error())
-		}
-
-		tags := s.getDefaultTags()
-		tags["type"] = "data"
-		tags["ns"] = fmt.Sprintf("%s.%s", table.DB, table.Name)
-		ts.Engine.AddEngineStats(TableTracking, acc, tags)
-		ts.Storage.AddStats(acc, tags)
 	}
+	return nil
+}
+
+func (s *Server) addTableStats(acc telegraf.Accumulator, table tableStatus) error {
+	cursor, err := gorethink.DB("rethinkdb").Table("stats").
+		Get([]string{"table_server", table.ID, s.serverStatus.ID}).
+		Run(s.session)
+	if err != nil {
+		return fmt.Errorf("table stats query error: %w", err)
+	}
+	defer cursor.Close()
+
+	var ts tableStats
+	if err := cursor.One(&ts); err != nil {
+		return fmt.Errorf("failure to parse table stats: %w", err)
+	}
+
+	tags := s.getDefaultTags()
+	tags["type"] = "data"
+	tags["ns"] = fmt.Sprintf("%s.%s", table.DB, table.Name)
+	ts.Engine.AddEngineStats(TableTracking, acc, tags)
+	ts.Storage.AddStats(acc, tags)
+
 	return nil
 }

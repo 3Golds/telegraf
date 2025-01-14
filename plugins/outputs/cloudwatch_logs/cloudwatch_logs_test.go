@@ -1,6 +1,7 @@
 package cloudwatch_logs
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -8,33 +9,43 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go/service/cloudwatchlogs"
-	"github.com/influxdata/telegraf"
-	internalaws "github.com/influxdata/telegraf/config/aws"
-	"github.com/influxdata/telegraf/testutil"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf"
+	"github.com/influxdata/telegraf/plugins/common/aws"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 type mockCloudWatchLogs struct {
 	logStreamName   string
-	pushedLogEvents []cloudwatchlogs.InputLogEvent
+	pushedLogEvents []types.InputLogEvent
 }
 
 func (c *mockCloudWatchLogs) Init(lsName string) {
 	c.logStreamName = lsName
-	c.pushedLogEvents = make([]cloudwatchlogs.InputLogEvent, 0)
+	c.pushedLogEvents = make([]types.InputLogEvent, 0)
 }
 
-func (c *mockCloudWatchLogs) DescribeLogGroups(*cloudwatchlogs.DescribeLogGroupsInput) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
+func (c *mockCloudWatchLogs) DescribeLogGroups(
+	context.Context,
+	*cloudwatchlogs.DescribeLogGroupsInput,
+	...func(options *cloudwatchlogs.Options),
+) (*cloudwatchlogs.DescribeLogGroupsOutput, error) {
 	return nil, nil
 }
 
-func (c *mockCloudWatchLogs) DescribeLogStreams(*cloudwatchlogs.DescribeLogStreamsInput) (*cloudwatchlogs.DescribeLogStreamsOutput, error) {
+func (c *mockCloudWatchLogs) DescribeLogStreams(
+	context.Context,
+	*cloudwatchlogs.DescribeLogStreamsInput,
+	...func(options *cloudwatchlogs.Options),
+) (*cloudwatchlogs.DescribeLogStreamsOutput, error) {
 	arn := "arn"
 	creationTime := time.Now().Unix()
 	sequenceToken := "arbitraryToken"
 	output := &cloudwatchlogs.DescribeLogStreamsOutput{
-		LogStreams: []*cloudwatchlogs.LogStream{
+		LogStreams: []types.LogStream{
 			{
 				Arn:                 &arn,
 				CreationTime:        &creationTime,
@@ -48,21 +59,29 @@ func (c *mockCloudWatchLogs) DescribeLogStreams(*cloudwatchlogs.DescribeLogStrea
 	}
 	return output, nil
 }
-func (c *mockCloudWatchLogs) CreateLogStream(*cloudwatchlogs.CreateLogStreamInput) (*cloudwatchlogs.CreateLogStreamOutput, error) {
+
+func (c *mockCloudWatchLogs) CreateLogStream(
+	context.Context,
+	*cloudwatchlogs.CreateLogStreamInput,
+	...func(options *cloudwatchlogs.Options),
+) (*cloudwatchlogs.CreateLogStreamOutput, error) {
 	return nil, nil
 }
-func (c *mockCloudWatchLogs) PutLogEvents(input *cloudwatchlogs.PutLogEventsInput) (*cloudwatchlogs.PutLogEventsOutput, error) {
+
+func (c *mockCloudWatchLogs) PutLogEvents(
+	_ context.Context,
+	input *cloudwatchlogs.PutLogEventsInput,
+	_ ...func(options *cloudwatchlogs.Options),
+) (*cloudwatchlogs.PutLogEventsOutput, error) {
 	sequenceToken := "arbitraryToken"
 	output := &cloudwatchlogs.PutLogEventsOutput{NextSequenceToken: &sequenceToken}
-	//Saving messages
-	for _, event := range input.LogEvents {
-		c.pushedLogEvents = append(c.pushedLogEvents, *event)
-	}
+	// Saving messages
+	c.pushedLogEvents = append(c.pushedLogEvents, input.LogEvents...)
 
 	return output, nil
 }
 
-//Ensure mockCloudWatchLogs implement cloudWatchLogs interface
+// Ensure mockCloudWatchLogs implement cloudWatchLogs interface
 var _ cloudWatchLogs = (*mockCloudWatchLogs)(nil)
 
 func RandStringBytes(n int) string {
@@ -83,7 +102,7 @@ func TestInit(t *testing.T) {
 			name:                "log group is not set",
 			expectedErrorString: "log group is not set",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -101,7 +120,7 @@ func TestInit(t *testing.T) {
 			name:                "log stream is not set",
 			expectedErrorString: "log stream is not set",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -119,7 +138,7 @@ func TestInit(t *testing.T) {
 			name:                "log data metrics name is not set",
 			expectedErrorString: "log data metrics name is not set",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -137,7 +156,7 @@ func TestInit(t *testing.T) {
 			name:                "log data source is not set",
 			expectedErrorString: "log data source is not set",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -156,7 +175,7 @@ func TestInit(t *testing.T) {
 			expectedErrorString: "log data source is not properly formatted, ':' is missed.\n" +
 				"Should be 'tag:<tag_mame>' or 'field:<field_name>'",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -175,7 +194,7 @@ func TestInit(t *testing.T) {
 			expectedErrorString: "log data source is not properly formatted.\n" +
 				"Should be 'tag:<tag_mame>' or 'field:<field_name>'",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
@@ -192,10 +211,28 @@ func TestInit(t *testing.T) {
 		{
 			name: "valid config",
 			plugin: &CloudWatchLogs{
-				CredentialConfig: internalaws.CredentialConfig{
+				CredentialConfig: aws.CredentialConfig{
 					Region:    "eu-central-1",
 					AccessKey: "dummy",
 					SecretKey: "dummy",
+				},
+				LogGroup:     "TestLogGroup",
+				LogStream:    "tag:source",
+				LDMetricName: "docker_log",
+				LDSource:     "tag:location",
+				Log: testutil.Logger{
+					Name: "outputs.cloudwatch_logs",
+				},
+			},
+		},
+		{
+			name: "valid config with EndpointURL",
+			plugin: &CloudWatchLogs{
+				CredentialConfig: aws.CredentialConfig{
+					Region:      "eu-central-1",
+					AccessKey:   "dummy",
+					SecretKey:   "dummy",
+					EndpointURL: "https://test.com",
 				},
 				LogGroup:     "TestLogGroup",
 				LogStream:    "tag:source",
@@ -213,19 +250,19 @@ func TestInit(t *testing.T) {
 			if tt.expectedErrorString != "" {
 				require.EqualError(t, tt.plugin.Init(), tt.expectedErrorString)
 			} else {
-				require.Nil(t, tt.plugin.Init())
+				require.NoError(t, tt.plugin.Init())
 			}
 		})
 	}
 }
 
 func TestConnect(t *testing.T) {
-	//mock cloudwatch logs endpoint that is used only in plugin.Connect
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintln(w,
+	// mock cloudwatch logs endpoint that is used only in plugin.Connect
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w,
 			`{
-				   "logGroups": [ 
-					  { 
+				   "logGroups": [
+					  {
 						 "arn": "string",
 						 "creationTime": 123456789,
 						 "kmsKeyId": "string",
@@ -240,7 +277,7 @@ func TestConnect(t *testing.T) {
 	defer ts.Close()
 
 	plugin := &CloudWatchLogs{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: aws.CredentialConfig{
 			Region:      "eu-central-1",
 			AccessKey:   "dummy",
 			SecretKey:   "dummy",
@@ -255,17 +292,17 @@ func TestConnect(t *testing.T) {
 		},
 	}
 
-	require.Nil(t, plugin.Init())
-	require.Nil(t, plugin.Connect())
+	require.NoError(t, plugin.Init())
+	require.NoError(t, plugin.Connect())
 }
 
 func TestWrite(t *testing.T) {
-	//mock cloudwatch logs endpoint that is used only in plugin.Connect
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprintln(w,
+	// mock cloudwatch logs endpoint that is used only in plugin.Connect
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintln(w,
 			`{
-				   "logGroups": [ 
-					  { 
+				   "logGroups": [
+					  {
 						 "arn": "string",
 						 "creationTime": 123456789,
 						 "kmsKeyId": "string",
@@ -280,7 +317,7 @@ func TestWrite(t *testing.T) {
 	defer ts.Close()
 
 	plugin := &CloudWatchLogs{
-		CredentialConfig: internalaws.CredentialConfig{
+		CredentialConfig: aws.CredentialConfig{
 			Region:      "eu-central-1",
 			AccessKey:   "dummy",
 			SecretKey:   "dummy",
@@ -294,14 +331,14 @@ func TestWrite(t *testing.T) {
 			Name: "outputs.cloudwatch_logs",
 		},
 	}
-	require.Nil(t, plugin.Init())
-	require.Nil(t, plugin.Connect())
+	require.NoError(t, plugin.Init())
+	require.NoError(t, plugin.Connect())
 
 	tests := []struct {
 		name                 string
 		logStreamName        string
 		metrics              []telegraf.Metric
-		expectedMetricsOrder map[int]int //map[<index of pushed log event>]<index of corresponding metric>
+		expectedMetricsOrder map[int]int // map[<index of pushed log event>]<index of corresponding metric>
 		expectedMetricsCount int
 	}{
 		{
@@ -433,7 +470,7 @@ func TestWrite(t *testing.T) {
 					},
 					map[string]interface{}{
 						"container_id": "deadbeef",
-						//Here comes very long message
+						// Here comes very long message
 						"message": RandStringBytes(maxLogMessageLength + 1),
 					},
 					time.Now().Add(-time.Minute),
@@ -457,7 +494,7 @@ func TestWrite(t *testing.T) {
 					},
 					map[string]interface{}{
 						"container_id": "deadbeef",
-						//Here comes very long message to cause message batching
+						// Here comes very long message to cause message batching
 						"message": "batch1 message1:" + RandStringBytes(maxLogMessageLength-16),
 					},
 					time.Now().Add(-4*time.Minute),
@@ -473,7 +510,7 @@ func TestWrite(t *testing.T) {
 					},
 					map[string]interface{}{
 						"container_id": "deadbeef",
-						//Here comes very long message to cause message batching
+						// Here comes very long message to cause message batching
 						"message": "batch1 message2:" + RandStringBytes(maxLogMessageLength-16),
 					},
 					time.Now().Add(-3*time.Minute),
@@ -489,7 +526,7 @@ func TestWrite(t *testing.T) {
 					},
 					map[string]interface{}{
 						"container_id": "deadbeef",
-						//Here comes very long message to cause message batching
+						// Here comes very long message to cause message batching
 						"message": "batch1 message3:" + RandStringBytes(maxLogMessageLength-16),
 					},
 					time.Now().Add(-2*time.Minute),
@@ -505,7 +542,7 @@ func TestWrite(t *testing.T) {
 					},
 					map[string]interface{}{
 						"container_id": "deadbeef",
-						//Here comes very long message to cause message batching
+						// Here comes very long message to cause message batching
 						"message": "batch1 message4:" + RandStringBytes(maxLogMessageLength-16),
 					},
 					time.Now().Add(-time.Minute),
@@ -531,12 +568,12 @@ func TestWrite(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			//Overwrite cloud watch log endpoint
+			// Overwrite cloud watch log endpoint
 			mockCwl := &mockCloudWatchLogs{}
 			mockCwl.Init(tt.logStreamName)
 			plugin.svc = mockCwl
-			require.Nil(t, plugin.Write(tt.metrics))
-			require.Equal(t, tt.expectedMetricsCount, len(mockCwl.pushedLogEvents))
+			require.NoError(t, plugin.Write(tt.metrics))
+			require.Len(t, mockCwl.pushedLogEvents, tt.expectedMetricsCount)
 
 			for index, elem := range mockCwl.pushedLogEvents {
 				require.Equal(t, *elem.Message, tt.metrics[tt.expectedMetricsOrder[index]].Fields()["message"])

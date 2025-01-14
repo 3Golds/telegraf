@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/assert"
 )
 
-func UnboundControl(output string) func(unbound Unbound) (*bytes.Buffer, error) {
-	return func(unbound Unbound) (*bytes.Buffer, error) {
-		return bytes.NewBuffer([]byte(output)), nil
+func UnboundControl(output string) func(Unbound) (*bytes.Buffer, error) {
+	return func(Unbound) (*bytes.Buffer, error) {
+		return bytes.NewBufferString(output), nil
 	}
 }
 
@@ -21,12 +22,12 @@ func TestParseFullOutput(t *testing.T) {
 	}
 	err := v.Gather(acc)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.True(t, acc.HasMeasurement("unbound"))
+	require.True(t, acc.HasMeasurement("unbound"))
 
-	assert.Len(t, acc.Metrics, 1)
-	assert.Equal(t, acc.NFields(), 63)
+	require.Len(t, acc.Metrics, 1)
+	require.Equal(t, 63, acc.NFields())
 
 	acc.AssertContainsFields(t, "unbound", parsedFullOutput)
 }
@@ -39,13 +40,13 @@ func TestParseFullOutputThreadAsTag(t *testing.T) {
 	}
 	err := v.Gather(acc)
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
-	assert.True(t, acc.HasMeasurement("unbound"))
-	assert.True(t, acc.HasMeasurement("unbound_threads"))
+	require.True(t, acc.HasMeasurement("unbound"))
+	require.True(t, acc.HasMeasurement("unbound_threads"))
 
-	assert.Len(t, acc.Metrics, 2)
-	assert.Equal(t, acc.NFields(), 63)
+	require.Len(t, acc.Metrics, 2)
+	require.Equal(t, 63, acc.NFields())
 
 	acc.AssertContainsFields(t, "unbound", parsedFullOutputThreadAsTagMeasurementUnbound)
 	acc.AssertContainsFields(t, "unbound_threads", parsedFullOutputThreadAsTagMeasurementUnboundThreads)

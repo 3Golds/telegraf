@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/influxdata/telegraf/plugins/parsers"
-	"github.com/influxdata/telegraf/testutil"
 	"github.com/nsqio/go-nsq"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/plugins/parsers/influx"
+	"github.com/influxdata/telegraf/testutil"
 )
 
 // This test is modeled after the kafka consumer integration test
@@ -35,23 +36,25 @@ func TestReadsMetricsFromNSQ(t *testing.T) {
 		{100 * time.Millisecond, -1, []byte("exit")},
 	}
 
-	addr, _ := net.ResolveTCPAddr("tcp", "127.0.0.1:4155")
-	newMockNSQD(script, addr.String())
+	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:4155")
+	require.NoError(t, err)
+	newMockNSQD(t, script, addr.String())
 
 	consumer := &NSQConsumer{
 		Log:                    testutil.Logger{},
-		Server:                 "127.0.0.1:4155",
 		Topic:                  "telegraf",
 		Channel:                "consume",
 		MaxInFlight:            1,
 		MaxUndeliveredMessages: defaultMaxUndeliveredMessages,
 		Nsqd:                   []string{"127.0.0.1:4155"},
 	}
+	require.NoError(t, consumer.Init())
 
-	p, _ := parsers.NewInfluxParser()
+	p := &influx.Parser{}
+	require.NoError(t, p.Init())
 	consumer.SetParser(p)
 	var acc testutil.Accumulator
-	require.Len(t, acc.Metrics, 0, "There should not be any points")
+	require.Empty(t, acc.Metrics, "There should not be any points")
 	require.NoError(t, consumer.Start(&acc))
 
 	waitForPoint(&acc, t)
@@ -76,6 +79,8 @@ func waitForPoint(acc *testutil.Accumulator, t *testing.T) {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	counter := 0
+
+	//nolint:gosimple // for-select used on purpose
 	for {
 		select {
 		case <-ticker.C:
@@ -89,16 +94,15 @@ func waitForPoint(acc *testutil.Accumulator, t *testing.T) {
 	}
 }
 
-func newMockNSQD(script []instruction, addr string) *mockNSQD {
+func newMockNSQD(t *testing.T, script []instruction, addr string) *mockNSQD {
 	n := &mockNSQD{
 		script:   script,
 		exitChan: make(chan int),
 	}
 
 	tcpListener, err := net.Listen("tcp", addr)
-	if err != nil {
-		log.Fatalf("FATAL: listen (%s) failed - %s", n.tcpAddr.String(), err)
-	}
+	require.NoError(t, err, "listen (%s) failed", n.tcpAddr.String())
+
 	n.tcpListener = tcpListener
 	n.tcpAddr = tcpListener.Addr().(*net.TCPAddr)
 
@@ -139,6 +143,7 @@ func (n *mockNSQD) handle(conn net.Conn) {
 	buf := make([]byte, 4)
 	_, err := io.ReadFull(conn, buf)
 	if err != nil {
+		//nolint:revive // log.Fatalf called intentionally
 		log.Fatalf("ERROR: failed to read protocol version - %s", err)
 	}
 
@@ -171,18 +176,22 @@ func (n *mockNSQD) handle(conn net.Conn) {
 				l := make([]byte, 4)
 				_, err := io.ReadFull(rdr, l)
 				if err != nil {
-					log.Printf(err.Error())
+					log.Print(err.Error())
 					goto exit
 				}
 				size := int32(binary.BigEndian.Uint32(l))
 				b := make([]byte, size)
 				_, err = io.ReadFull(rdr, b)
 				if err != nil {
-					log.Printf(err.Error())
+					log.Print(err.Error())
 					goto exit
 				}
 			case bytes.Equal(params[0], []byte("RDY")):
-				rdy, _ := strconv.Atoi(string(params[1]))
+				rdy, err := strconv.Atoi(string(params[1]))
+				if err != nil {
+					log.Print(err.Error())
+					goto exit
+				}
 				rdyCount = rdy
 			case bytes.Equal(params[0], []byte("FIN")):
 			case bytes.Equal(params[0], []byte("REQ")):
@@ -200,11 +209,7 @@ func (n *mockNSQD) handle(conn net.Conn) {
 				}
 				rdyCount--
 			}
-			buf, err := framedResponse(inst.frameType, inst.body)
-			if err != nil {
-				log.Print(err.Error())
-				goto exit
-			}
+			buf := framedResponse(inst.frameType, inst.body)
 			_, err = conn.Write(buf)
 			if err != nil {
 				log.Print(err.Error())
@@ -216,33 +221,24 @@ func (n *mockNSQD) handle(conn net.Conn) {
 	}
 
 exit:
-	// Ignore the returned error as we cannot do anything about it anyway
-	//nolint:errcheck,revive
 	n.tcpListener.Close()
-	//nolint:errcheck,revive
 	conn.Close()
 }
 
-func framedResponse(frameType int32, data []byte) ([]byte, error) {
+func framedResponse(frameType int32, data []byte) []byte {
 	var w bytes.Buffer
 
 	beBuf := make([]byte, 4)
 	size := uint32(len(data)) + 4
 
 	binary.BigEndian.PutUint32(beBuf, size)
-	_, err := w.Write(beBuf)
-	if err != nil {
-		return nil, err
-	}
+	w.Write(beBuf)
 
 	binary.BigEndian.PutUint32(beBuf, uint32(frameType))
-	_, err = w.Write(beBuf)
-	if err != nil {
-		return nil, err
-	}
+	w.Write(beBuf)
 
-	_, err = w.Write(data)
-	return w.Bytes(), err
+	w.Write(data)
+	return w.Bytes()
 }
 
 func frameMessage(m *nsq.Message) ([]byte, error) {

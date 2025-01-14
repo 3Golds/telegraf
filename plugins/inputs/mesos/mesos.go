@@ -1,10 +1,11 @@
+//go:generate ../../../tools/readme_config_includer/generator
 package mesos
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,25 +17,33 @@ import (
 	"github.com/influxdata/telegraf"
 	"github.com/influxdata/telegraf/plugins/common/tls"
 	"github.com/influxdata/telegraf/plugins/inputs"
-	jsonparser "github.com/influxdata/telegraf/plugins/parsers/json"
+	parsers_json "github.com/influxdata/telegraf/plugins/parsers/json"
 )
 
-type Role string
+//go:embed sample.conf
+var sampleConfig string
+
+type role string
 
 const (
-	MASTER Role = "master"
-	SLAVE       = "slave"
+	master role = "master"
+	slave  role = "slave"
 )
 
+var allMetrics = map[role][]string{
+	master: {"resources", "master", "system", "agents", "frameworks", "framework_offers", "tasks", "messages", "evqueue", "registrar", "allocator"},
+	slave:  {"resources", "agent", "system", "executors", "tasks", "messages"},
+}
+
 type Mesos struct {
-	Timeout    int
-	Masters    []string
+	Timeout    int      `toml:"timeout"`
+	Masters    []string `toml:"masters"`
 	MasterCols []string `toml:"master_collections"`
-	Slaves     []string
+	Slaves     []string `toml:"slaves"`
 	SlaveCols  []string `toml:"slave_collections"`
 	tls.ClientConfig
 
-	Log telegraf.Logger
+	Log telegraf.Logger `toml:"-"`
 
 	initialized bool
 	client      *http.Client
@@ -42,80 +51,58 @@ type Mesos struct {
 	slaveURLs   []*url.URL
 }
 
-var allMetrics = map[Role][]string{
-	MASTER: {"resources", "master", "system", "agents", "frameworks", "framework_offers", "tasks", "messages", "evqueue", "registrar", "allocator"},
-	SLAVE:  {"resources", "agent", "system", "executors", "tasks", "messages"},
-}
-
-var sampleConfig = `
-  ## Timeout, in ms.
-  timeout = 100
-
-  ## A list of Mesos masters.
-  masters = ["http://localhost:5050"]
-
-  ## Master metrics groups to be collected, by default, all enabled.
-  master_collections = [
-    "resources",
-    "master",
-    "system",
-    "agents",
-    "frameworks",
-    "framework_offers",
-    "tasks",
-    "messages",
-    "evqueue",
-    "registrar",
-    "allocator",
-  ]
-
-  ## A list of Mesos slaves, default is []
-  # slaves = []
-
-  ## Slave metrics groups to be collected, by default, all enabled.
-  # slave_collections = [
-  #   "resources",
-  #   "agent",
-  #   "system",
-  #   "executors",
-  #   "tasks",
-  #   "messages",
-  # ]
-
-  ## Optional TLS Config
-  # tls_ca = "/etc/telegraf/ca.pem"
-  # tls_cert = "/etc/telegraf/cert.pem"
-  # tls_key = "/etc/telegraf/key.pem"
-  ## Use TLS but skip chain & host verification
-  # insecure_skip_verify = false
-`
-
-// SampleConfig returns a sample configuration block
-func (m *Mesos) SampleConfig() string {
+func (*Mesos) SampleConfig() string {
 	return sampleConfig
 }
 
-// Description just returns a short description of the Mesos plugin
-func (m *Mesos) Description() string {
-	return "Telegraf plugin for gathering metrics from N Mesos masters"
+func (m *Mesos) Gather(acc telegraf.Accumulator) error {
+	if !m.initialized {
+		err := m.initialize()
+		if err != nil {
+			return err
+		}
+		m.initialized = true
+	}
+
+	var wg sync.WaitGroup
+
+	for _, mstr := range m.masterURLs {
+		wg.Add(1)
+		go func(mstr *url.URL) {
+			acc.AddError(m.gatherMainMetrics(mstr, master, acc))
+			wg.Done()
+		}(mstr)
+	}
+
+	for _, slv := range m.slaveURLs {
+		wg.Add(1)
+		go func(slv *url.URL) {
+			acc.AddError(m.gatherMainMetrics(slv, slave, acc))
+			wg.Done()
+		}(slv)
+	}
+
+	wg.Wait()
+
+	return nil
 }
 
-func parseURL(s string, role Role) (*url.URL, error) {
+func (m *Mesos) parseURL(s string, role role) (*url.URL, error) {
 	if !strings.HasPrefix(s, "http://") && !strings.HasPrefix(s, "https://") {
 		host, port, err := net.SplitHostPort(s)
 		// no port specified
 		if err != nil {
 			host = s
 			switch role {
-			case MASTER:
+			case master:
 				port = "5050"
-			case SLAVE:
+			case slave:
 				port = "5051"
 			}
 		}
 
 		s = "http://" + host + ":" + port
-		log.Printf("W! [inputs.mesos] using %q as connection URL; please update your configuration to use an URL", s)
+		m.Log.Warnf("using %q as connection URL; please update your configuration to use an URL", s)
 	}
 
 	return url.Parse(s)
@@ -123,11 +110,11 @@ func parseURL(s string, role Role) (*url.URL, error) {
 
 func (m *Mesos) initialize() error {
 	if len(m.MasterCols) == 0 {
-		m.MasterCols = allMetrics[MASTER]
+		m.MasterCols = allMetrics[master]
 	}
 
 	if len(m.SlaveCols) == 0 {
-		m.SlaveCols = allMetrics[SLAVE]
+		m.SlaveCols = allMetrics[slave]
 	}
 
 	if m.Timeout == 0 {
@@ -138,8 +125,8 @@ func (m *Mesos) initialize() error {
 	rawQuery := "timeout=" + strconv.Itoa(m.Timeout) + "ms"
 
 	m.masterURLs = make([]*url.URL, 0, len(m.Masters))
-	for _, master := range m.Masters {
-		u, err := parseURL(master, MASTER)
+	for _, mstr := range m.Masters {
+		u, err := m.parseURL(mstr, master)
 		if err != nil {
 			return err
 		}
@@ -149,8 +136,8 @@ func (m *Mesos) initialize() error {
 	}
 
 	m.slaveURLs = make([]*url.URL, 0, len(m.Slaves))
-	for _, slave := range m.Slaves {
-		u, err := parseURL(slave, SLAVE)
+	for _, slv := range m.Slaves {
+		u, err := m.parseURL(slv, slave)
 		if err != nil {
 			return err
 		}
@@ -164,39 +151,6 @@ func (m *Mesos) initialize() error {
 		return err
 	}
 	m.client = client
-
-	return nil
-}
-
-// Gather() metrics from given list of Mesos Masters
-func (m *Mesos) Gather(acc telegraf.Accumulator) error {
-	if !m.initialized {
-		err := m.initialize()
-		if err != nil {
-			return err
-		}
-		m.initialized = true
-	}
-
-	var wg sync.WaitGroup
-
-	for _, master := range m.masterURLs {
-		wg.Add(1)
-		go func(master *url.URL) {
-			acc.AddError(m.gatherMainMetrics(master, MASTER, acc))
-			wg.Done()
-		}(master)
-	}
-
-	for _, slave := range m.slaveURLs {
-		wg.Add(1)
-		go func(slave *url.URL) {
-			acc.AddError(m.gatherMainMetrics(slave, SLAVE, acc))
-			wg.Done()
-		}(slave)
-	}
-
-	wg.Wait()
 
 	return nil
 }
@@ -219,8 +173,8 @@ func (m *Mesos) createHTTPClient() (*http.Client, error) {
 }
 
 // metricsDiff() returns set names for removal
-func metricsDiff(role Role, w []string) []string {
-	b := []string{}
+func metricsDiff(role role, w []string) []string {
+	b := make([]string, 0, len(allMetrics[role]))
 	s := make(map[string]bool)
 
 	if len(w) == 0 {
@@ -241,11 +195,11 @@ func metricsDiff(role Role, w []string) []string {
 }
 
 // masterBlocks serves as kind of metrics registry grouping them in sets
-func getMetrics(role Role, group string) []string {
-	m := make(map[string][]string)
+func (m *Mesos) getMetrics(role role, group string) []string {
+	metrics := make(map[string][]string)
 
-	if role == MASTER {
-		m["resources"] = []string{
+	if role == master {
+		metrics["resources"] = []string{
 			"master/cpus_percent",
 			"master/cpus_used",
 			"master/cpus_total",
@@ -272,12 +226,12 @@ func getMetrics(role Role, group string) []string {
 			"master/mem_revocable_used",
 		}
 
-		m["master"] = []string{
+		metrics["master"] = []string{
 			"master/elected",
 			"master/uptime_secs",
 		}
 
-		m["system"] = []string{
+		metrics["system"] = []string{
 			"system/cpus_total",
 			"system/load_15min",
 			"system/load_5min",
@@ -286,7 +240,7 @@ func getMetrics(role Role, group string) []string {
 			"system/mem_total_bytes",
 		}
 
-		m["agents"] = []string{
+		metrics["agents"] = []string{
 			"master/slave_registrations",
 			"master/slave_removals",
 			"master/slave_reregistrations",
@@ -303,7 +257,7 @@ func getMetrics(role Role, group string) []string {
 			"master/slaves_unreachable",
 		}
 
-		m["frameworks"] = []string{
+		metrics["frameworks"] = []string{
 			"master/frameworks_active",
 			"master/frameworks_connected",
 			"master/frameworks_disconnected",
@@ -314,10 +268,10 @@ func getMetrics(role Role, group string) []string {
 		// framework_offers and allocator metrics have unpredictable names, so they can't be listed here.
 		// These empty groups are included to prevent the "unknown metrics group" info log below.
 		// filterMetrics() filters these metrics by looking for names with the corresponding prefix.
-		m["framework_offers"] = []string{}
-		m["allocator"] = []string{}
+		metrics["framework_offers"] = make([]string, 0)
+		metrics["allocator"] = make([]string, 0)
 
-		m["tasks"] = []string{
+		metrics["tasks"] = []string{
 			"master/tasks_error",
 			"master/tasks_failed",
 			"master/tasks_finished",
@@ -333,7 +287,7 @@ func getMetrics(role Role, group string) []string {
 			"master/tasks_unreachable",
 		}
 
-		m["messages"] = []string{
+		metrics["messages"] = []string{
 			"master/invalid_executor_to_framework_messages",
 			"master/invalid_framework_to_executor_messages",
 			"master/invalid_status_update_acknowledgements",
@@ -377,14 +331,14 @@ func getMetrics(role Role, group string) []string {
 			"master/valid_operation_status_update_acknowledgements",
 		}
 
-		m["evqueue"] = []string{
+		metrics["evqueue"] = []string{
 			"master/event_queue_dispatches",
 			"master/event_queue_http_requests",
 			"master/event_queue_messages",
 			"master/operator_event_stream_subscribers",
 		}
 
-		m["registrar"] = []string{
+		metrics["registrar"] = []string{
 			"registrar/state_fetch_ms",
 			"registrar/state_store_ms",
 			"registrar/state_store_ms/max",
@@ -401,8 +355,8 @@ func getMetrics(role Role, group string) []string {
 			"registrar/registry_size_bytes",
 			"registrar/state_store_ms/count",
 		}
-	} else if role == SLAVE {
-		m["resources"] = []string{
+	} else if role == slave {
+		metrics["resources"] = []string{
 			"slave/cpus_percent",
 			"slave/cpus_used",
 			"slave/cpus_total",
@@ -429,12 +383,12 @@ func getMetrics(role Role, group string) []string {
 			"slave/mem_revocable_used",
 		}
 
-		m["agent"] = []string{
+		metrics["agent"] = []string{
 			"slave/registered",
 			"slave/uptime_secs",
 		}
 
-		m["system"] = []string{
+		metrics["system"] = []string{
 			"system/cpus_total",
 			"system/load_15min",
 			"system/load_5min",
@@ -443,7 +397,7 @@ func getMetrics(role Role, group string) []string {
 			"system/mem_total_bytes",
 		}
 
-		m["executors"] = []string{
+		metrics["executors"] = []string{
 			"containerizer/mesos/container_destroy_errors",
 			"slave/container_launch_errors",
 			"slave/executors_preempted",
@@ -456,7 +410,7 @@ func getMetrics(role Role, group string) []string {
 			"slave/recovery_errors",
 		}
 
-		m["tasks"] = []string{
+		metrics["tasks"] = []string{
 			"slave/tasks_failed",
 			"slave/tasks_finished",
 			"slave/tasks_killed",
@@ -466,7 +420,7 @@ func getMetrics(role Role, group string) []string {
 			"slave/tasks_starting",
 		}
 
-		m["messages"] = []string{
+		metrics["messages"] = []string{
 			"slave/invalid_framework_messages",
 			"slave/invalid_status_updates",
 			"slave/valid_framework_messages",
@@ -474,23 +428,22 @@ func getMetrics(role Role, group string) []string {
 		}
 	}
 
-	ret, ok := m[group]
-
+	ret, ok := metrics[group]
 	if !ok {
-		log.Printf("I! [inputs.mesos] unknown role %q metrics group: %s", role, group)
-		return []string{}
+		m.Log.Infof("Unknown role %q metrics group: %s", role, group)
+		return nil
 	}
 
 	return ret
 }
 
-func (m *Mesos) filterMetrics(role Role, metrics *map[string]interface{}) {
+func (m *Mesos) filterMetrics(role role, metrics *map[string]interface{}) {
 	var ok bool
 	var selectedMetrics []string
 
-	if role == MASTER {
+	if role == master {
 		selectedMetrics = m.MasterCols
-	} else if role == SLAVE {
+	} else if role == slave {
 		selectedMetrics = m.SlaveCols
 	}
 
@@ -512,20 +465,13 @@ func (m *Mesos) filterMetrics(role Role, metrics *map[string]interface{}) {
 
 		// All other metrics have predictable names. We can use getMetrics() to retrieve them.
 		default:
-			for _, v := range getMetrics(role, k) {
+			for _, v := range m.getMetrics(role, k) {
 				if _, ok = (*metrics)[v]; ok {
 					delete(*metrics, v)
 				}
 			}
 		}
 	}
-}
-
-// TaskStats struct for JSON API output /monitor/statistics
-type TaskStats struct {
-	ExecutorID  string                 `json:"executor_id"`
-	FrameworkID string                 `json:"framework_id"`
-	Statistics  map[string]interface{} `json:"statistics"`
 }
 
 func withPath(u *url.URL, path string) *url.URL {
@@ -543,7 +489,7 @@ func urlTag(u *url.URL) string {
 }
 
 // This should not belong to the object
-func (m *Mesos) gatherMainMetrics(u *url.URL, role Role, acc telegraf.Accumulator) error {
+func (m *Mesos) gatherMainMetrics(u *url.URL, role role, acc telegraf.Accumulator) error {
 	var jsonOut map[string]interface{}
 
 	tags := map[string]string{
@@ -559,8 +505,6 @@ func (m *Mesos) gatherMainMetrics(u *url.URL, role Role, acc telegraf.Accumulato
 	}
 
 	data, err := io.ReadAll(resp.Body)
-	// Ignore the returned error to not shadow the initial one
-	//nolint:errcheck,revive
 	resp.Body.Close()
 	if err != nil {
 		return err
@@ -572,7 +516,7 @@ func (m *Mesos) gatherMainMetrics(u *url.URL, role Role, acc telegraf.Accumulato
 
 	m.filterMetrics(role, &jsonOut)
 
-	jf := jsonparser.JSONFlattener{}
+	jf := parsers_json.JSONFlattener{}
 
 	err = jf.FlattenJSON("", jsonOut)
 
@@ -580,7 +524,7 @@ func (m *Mesos) gatherMainMetrics(u *url.URL, role Role, acc telegraf.Accumulato
 		return err
 	}
 
-	if role == MASTER {
+	if role == master {
 		if jf.Fields["master/elected"] != 0.0 {
 			tags["state"] = "leader"
 		} else {

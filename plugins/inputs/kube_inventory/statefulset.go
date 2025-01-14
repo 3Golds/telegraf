@@ -3,7 +3,7 @@ package kube_inventory
 import (
 	"context"
 
-	v1 "k8s.io/api/apps/v1"
+	"k8s.io/api/apps/v1"
 
 	"github.com/influxdata/telegraf"
 )
@@ -14,12 +14,12 @@ func collectStatefulSets(ctx context.Context, acc telegraf.Accumulator, ki *Kube
 		acc.AddError(err)
 		return
 	}
-	for _, s := range list.Items {
-		ki.gatherStatefulSet(s, acc)
+	for i := range list.Items {
+		ki.gatherStatefulSet(&list.Items[i], acc)
 	}
 }
 
-func (ki *KubernetesInventory) gatherStatefulSet(s v1.StatefulSet, acc telegraf.Accumulator) {
+func (ki *KubernetesInventory) gatherStatefulSet(s *v1.StatefulSet, acc telegraf.Accumulator) {
 	status := s.Status
 	fields := map[string]interface{}{
 		"created":             s.GetCreationTimestamp().UnixNano(),
@@ -28,16 +28,20 @@ func (ki *KubernetesInventory) gatherStatefulSet(s v1.StatefulSet, acc telegraf.
 		"replicas_current":    status.CurrentReplicas,
 		"replicas_ready":      status.ReadyReplicas,
 		"replicas_updated":    status.UpdatedReplicas,
-		"spec_replicas":       *s.Spec.Replicas,
 		"observed_generation": s.Status.ObservedGeneration,
+	}
+	if s.Spec.Replicas != nil {
+		fields["spec_replicas"] = *s.Spec.Replicas
 	}
 	tags := map[string]string{
 		"statefulset_name": s.Name,
 		"namespace":        s.Namespace,
 	}
-	for key, val := range s.Spec.Selector.MatchLabels {
-		if ki.selectorFilter.Match(key) {
-			tags["selector_"+key] = val
+	if s.Spec.Selector != nil {
+		for key, val := range s.Spec.Selector.MatchLabels {
+			if ki.selectorFilter.Match(key) {
+				tags["selector_"+key] = val
+			}
 		}
 	}
 

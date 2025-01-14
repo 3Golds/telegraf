@@ -14,13 +14,14 @@ func collectServices(ctx context.Context, acc telegraf.Accumulator, ki *Kubernet
 		acc.AddError(err)
 		return
 	}
-	for _, i := range list.Items {
-		ki.gatherService(i, acc)
+	for i := range list.Items {
+		ki.gatherService(&list.Items[i], acc)
 	}
 }
 
-func (ki *KubernetesInventory) gatherService(s corev1.Service, acc telegraf.Accumulator) {
-	if s.GetCreationTimestamp().Second() == 0 && s.GetCreationTimestamp().Nanosecond() == 0 {
+func (ki *KubernetesInventory) gatherService(s *corev1.Service, acc telegraf.Accumulator) {
+	creationTs := s.GetCreationTimestamp()
+	if creationTs.IsZero() {
 		return
 	}
 

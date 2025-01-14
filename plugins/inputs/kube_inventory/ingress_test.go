@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
 	netv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -14,8 +13,6 @@ import (
 )
 
 func TestIngress(t *testing.T) {
-	cli := &client{}
-
 	now := time.Now()
 	now = time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), 1, 36, 0, now.Location())
 
@@ -42,8 +39,8 @@ func TestIngress(t *testing.T) {
 						Items: []netv1.Ingress{
 							{
 								Status: netv1.IngressStatus{
-									LoadBalancer: v1.LoadBalancerStatus{
-										Ingress: []v1.LoadBalancerIngress{
+									LoadBalancer: netv1.IngressLoadBalancerStatus{
+										Ingress: []netv1.IngressLoadBalancerIngress{
 											{
 												Hostname: "chron-1",
 												IP:       "1.0.0.127",
@@ -109,15 +106,120 @@ func TestIngress(t *testing.T) {
 			},
 			hasError: false,
 		},
+		{
+			name: "no HTTPIngressRuleValue",
+			handler: &mockHandler{
+				responseMap: map[string]interface{}{
+					"/ingress/": netv1.IngressList{
+						Items: []netv1.Ingress{
+							{
+								Status: netv1.IngressStatus{
+									LoadBalancer: netv1.IngressLoadBalancerStatus{
+										Ingress: []netv1.IngressLoadBalancerIngress{
+											{
+												Hostname: "chron-1",
+												IP:       "1.0.0.127",
+											},
+										},
+									},
+								},
+								Spec: netv1.IngressSpec{
+									Rules: []netv1.IngressRule{
+										{
+											Host: "ui.internal",
+											IngressRuleValue: netv1.IngressRuleValue{
+												HTTP: nil,
+											},
+										},
+									},
+								},
+								ObjectMeta: metav1.ObjectMeta{
+									Generation:        12,
+									Namespace:         "ns1",
+									Name:              "ui-lb",
+									CreationTimestamp: metav1.Time{Time: now},
+								},
+							},
+						},
+					},
+				},
+			},
+			hasError: false,
+		},
+		{
+			name: "no IngressServiceBackend",
+			handler: &mockHandler{
+				responseMap: map[string]interface{}{
+					"/ingress/": netv1.IngressList{
+						Items: []netv1.Ingress{
+							{
+								Status: netv1.IngressStatus{
+									LoadBalancer: netv1.IngressLoadBalancerStatus{
+										Ingress: []netv1.IngressLoadBalancerIngress{
+											{
+												Hostname: "chron-1",
+												IP:       "1.0.0.127",
+											},
+										},
+									},
+								},
+								Spec: netv1.IngressSpec{
+									Rules: []netv1.IngressRule{
+										{
+											Host: "ui.internal",
+											IngressRuleValue: netv1.IngressRuleValue{
+												HTTP: &netv1.HTTPIngressRuleValue{
+													Paths: []netv1.HTTPIngressPath{
+														{
+															Path: "/",
+															Backend: netv1.IngressBackend{
+																Service: nil,
+															},
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+								ObjectMeta: metav1.ObjectMeta{
+									Generation:        12,
+									Namespace:         "ns1",
+									Name:              "ui-lb",
+									CreationTimestamp: metav1.Time{Time: now},
+								},
+							},
+						},
+					},
+				},
+			},
+			output: []telegraf.Metric{
+				testutil.MustMetric(
+					"kubernetes_ingress",
+					map[string]string{
+						"ingress_name": "ui-lb",
+						"namespace":    "ns1",
+						"ip":           "1.0.0.127",
+						"hostname":     "chron-1",
+						"host":         "ui.internal",
+						"path":         "/",
+					},
+					map[string]interface{}{
+						"tls":        false,
+						"generation": int64(12),
+						"created":    now.UnixNano(),
+					},
+					time.Unix(0, 0),
+				),
+			},
+			hasError: false,
+		},
 	}
 
 	for _, v := range tests {
-		ks := &KubernetesInventory{
-			client: cli,
-		}
 		acc := new(testutil.Accumulator)
 		for _, ingress := range ((v.handler.responseMap["/ingress/"]).(netv1.IngressList)).Items {
-			ks.gatherIngress(ingress, acc)
+			gatherIngress(ingress, acc)
 		}
 
 		err := acc.FirstError()

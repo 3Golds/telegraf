@@ -1,8 +1,11 @@
 // Package uwsgi implements a telegraf plugin for collecting uwsgi stats from
 // the uwsgi stats server.
+//
+//go:generate ../../../tools/readme_config_includer/generator
 package uwsgi
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,6 +22,9 @@ import (
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
+//go:embed sample.conf
+var sampleConfig string
+
 // Uwsgi server struct
 type Uwsgi struct {
 	Servers []string        `toml:"servers"`
@@ -27,24 +33,8 @@ type Uwsgi struct {
 	client *http.Client
 }
 
-// Description returns the plugin description
-func (u *Uwsgi) Description() string {
-	return "Read uWSGI metrics."
-}
-
-// SampleConfig returns the sample configuration
-func (u *Uwsgi) SampleConfig() string {
-	return `
-  ## List with urls of uWSGI Stats servers. URL must match pattern:
-  ## scheme://address[:port]
-  ##
-  ## For example:
-  ## servers = ["tcp://localhost:5050", "http://localhost:1717", "unix:///tmp/statsock"]
-  servers = ["tcp://127.0.0.1:1717"]
-
-  ## General connection timeout
-  # timeout = "5s"
-`
+func (*Uwsgi) SampleConfig() string {
+	return sampleConfig
 }
 
 // Gather collect data from uWSGI Server
@@ -62,7 +52,7 @@ func (u *Uwsgi) Gather(acc telegraf.Accumulator) error {
 			defer wg.Done()
 			n, err := url.Parse(s)
 			if err != nil {
-				acc.AddError(fmt.Errorf("could not parse uWSGI Stats Server url '%s': %s", s, err.Error()))
+				acc.AddError(fmt.Errorf("could not parse uWSGI Stats Server url %q: %w", s, err))
 				return
 			}
 
@@ -78,20 +68,20 @@ func (u *Uwsgi) Gather(acc telegraf.Accumulator) error {
 	return nil
 }
 
-func (u *Uwsgi) gatherServer(acc telegraf.Accumulator, url *url.URL) error {
+func (u *Uwsgi) gatherServer(acc telegraf.Accumulator, address *url.URL) error {
 	var err error
 	var r io.ReadCloser
 	var s StatsServer
 
-	switch url.Scheme {
+	switch address.Scheme {
 	case "tcp":
-		r, err = net.DialTimeout(url.Scheme, url.Host, time.Duration(u.Timeout))
+		r, err = net.DialTimeout(address.Scheme, address.Host, time.Duration(u.Timeout))
 		if err != nil {
 			return err
 		}
-		s.source = url.Host
+		s.source = address.Host
 	case "unix":
-		r, err = net.DialTimeout(url.Scheme, url.Path, time.Duration(u.Timeout))
+		r, err = net.DialTimeout(address.Scheme, address.Path, time.Duration(u.Timeout))
 		if err != nil {
 			return err
 		}
@@ -100,28 +90,28 @@ func (u *Uwsgi) gatherServer(acc telegraf.Accumulator, url *url.URL) error {
 			s.source = ""
 		}
 	case "http":
-		resp, err := u.client.Get(url.String())
+		resp, err := u.client.Get(address.String()) //nolint:bodyclose // response body is closed after switch
 		if err != nil {
 			return err
 		}
 		r = resp.Body
-		s.source = url.Host
+		s.source = address.Host
 	default:
-		return fmt.Errorf("'%s' is not a supported scheme", url.Scheme)
+		return fmt.Errorf("%q is not a supported scheme", address.Scheme)
 	}
 
 	defer r.Close()
 
 	if err := json.NewDecoder(r).Decode(&s); err != nil {
-		return fmt.Errorf("failed to decode json payload from '%s': %s", url.String(), err.Error())
+		return fmt.Errorf("failed to decode json payload from %q: %w", address.String(), err)
 	}
 
-	u.gatherStatServer(acc, &s)
+	gatherStatServer(acc, &s)
 
 	return err
 }
 
-func (u *Uwsgi) gatherStatServer(acc telegraf.Accumulator, s *StatsServer) {
+func gatherStatServer(acc telegraf.Accumulator, s *StatsServer) {
 	fields := map[string]interface{}{
 		"listen_queue":        s.ListenQueue,
 		"listen_queue_errors": s.ListenQueueErrors,
@@ -138,12 +128,12 @@ func (u *Uwsgi) gatherStatServer(acc telegraf.Accumulator, s *StatsServer) {
 	}
 	acc.AddFields("uwsgi_overview", fields, tags)
 
-	u.gatherWorkers(acc, s)
-	u.gatherApps(acc, s)
-	u.gatherCores(acc, s)
+	gatherWorkers(acc, s)
+	gatherApps(acc, s)
+	gatherCores(acc, s)
 }
 
-func (u *Uwsgi) gatherWorkers(acc telegraf.Accumulator, s *StatsServer) {
+func gatherWorkers(acc telegraf.Accumulator, s *StatsServer) {
 	for _, w := range s.Workers {
 		fields := map[string]interface{}{
 			"requests":       w.Requests,
@@ -172,7 +162,7 @@ func (u *Uwsgi) gatherWorkers(acc telegraf.Accumulator, s *StatsServer) {
 	}
 }
 
-func (u *Uwsgi) gatherApps(acc telegraf.Accumulator, s *StatsServer) {
+func gatherApps(acc telegraf.Accumulator, s *StatsServer) {
 	for _, w := range s.Workers {
 		for _, a := range w.Apps {
 			fields := map[string]interface{}{
@@ -191,7 +181,7 @@ func (u *Uwsgi) gatherApps(acc telegraf.Accumulator, s *StatsServer) {
 	}
 }
 
-func (u *Uwsgi) gatherCores(acc telegraf.Accumulator, s *StatsServer) {
+func gatherCores(acc telegraf.Accumulator, s *StatsServer) {
 	for _, w := range s.Workers {
 		for _, c := range w.Cores {
 			fields := map[string]interface{}{

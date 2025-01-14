@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/influxdata/telegraf/testutil"
 )
 
 const nginxSampleResponse = `
@@ -29,11 +29,11 @@ Reading: 8 Writing: 125 Waiting: 946
 // Verify that nginx tags are properly parsed based on the server
 func TestNginxTags(t *testing.T) {
 	urls := []string{"http://localhost/endpoint", "http://localhost:80/endpoint"}
-	var addr *url.URL
 	for _, url1 := range urls {
-		addr, _ = url.Parse(url1)
+		addr, err := url.Parse(url1)
+		require.NoError(t, err)
 		tagMap := getTags(addr)
-		assert.Contains(t, tagMap["server"], "localhost")
+		require.Contains(t, tagMap["server"], "localhost")
 	}
 }
 
@@ -46,20 +46,25 @@ func TestNginxGeneratesMetrics(t *testing.T) {
 		} else if r.URL.Path == "/tengine_status" {
 			rsp = tengineSampleResponse
 		} else {
-			require.Fail(t, "Cannot handle request")
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Errorf("Cannot handle request, unknown path")
+			return
 		}
 
-		_, err := fmt.Fprintln(w, rsp)
-		require.NoError(t, err)
+		if _, err := fmt.Fprintln(w, rsp); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			t.Error(err)
+			return
+		}
 	}))
 	defer ts.Close()
 
 	n := &Nginx{
-		Urls: []string{fmt.Sprintf("%s/stub_status", ts.URL)},
+		Urls: []string{ts.URL + "/stub_status"},
 	}
 
 	nt := &Nginx{
-		Urls: []string{fmt.Sprintf("%s/tengine_status", ts.URL)},
+		Urls: []string{ts.URL + "/tengine_status"},
 	}
 
 	var accNginx testutil.Accumulator

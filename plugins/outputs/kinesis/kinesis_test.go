@@ -1,20 +1,19 @@
 package kinesis
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/awserr"
-	"github.com/aws/aws-sdk-go/service/kinesis"
-	"github.com/aws/aws-sdk-go/service/kinesis/kinesisiface"
-	"github.com/gofrs/uuid"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis"
+	"github.com/aws/aws-sdk-go-v2/service/kinesis/types"
+	"github.com/gofrs/uuid/v5"
+	"github.com/stretchr/testify/require"
+
 	"github.com/influxdata/telegraf"
-	"github.com/influxdata/telegraf/plugins/serializers"
 	"github.com/influxdata/telegraf/plugins/serializers/influx"
 	"github.com/influxdata/telegraf/testutil"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const testPartitionKey = "partitionKey"
@@ -24,7 +23,6 @@ const testStreamName = "streamName"
 const zero int64 = 0
 
 func TestPartitionKey(t *testing.T) {
-	assert := assert.New(t)
 	testPoint := testutil.TestMetric(1)
 
 	k := KinesisOutput{
@@ -34,7 +32,7 @@ func TestPartitionKey(t *testing.T) {
 			Key:    "-",
 		},
 	}
-	assert.Equal("-", k.getPartitionKey(testPoint), "PartitionKey should be '-'")
+	require.Equal(t, "-", k.getPartitionKey(testPoint), "PartitionKey should be '-'")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -43,7 +41,7 @@ func TestPartitionKey(t *testing.T) {
 			Key:    "tag1",
 		},
 	}
-	assert.Equal(testPoint.Tags()["tag1"], k.getPartitionKey(testPoint), "PartitionKey should be value of 'tag1'")
+	require.Equal(t, testPoint.Tags()["tag1"], k.getPartitionKey(testPoint), "PartitionKey should be value of 'tag1'")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -53,7 +51,7 @@ func TestPartitionKey(t *testing.T) {
 			Default: "somedefault",
 		},
 	}
-	assert.Equal("somedefault", k.getPartitionKey(testPoint), "PartitionKey should use default")
+	require.Equal(t, "somedefault", k.getPartitionKey(testPoint), "PartitionKey should use default")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -62,7 +60,7 @@ func TestPartitionKey(t *testing.T) {
 			Key:    "doesnotexist",
 		},
 	}
-	assert.Equal("telegraf", k.getPartitionKey(testPoint), "PartitionKey should be telegraf")
+	require.Equal(t, "telegraf", k.getPartitionKey(testPoint), "PartitionKey should be telegraf")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -70,7 +68,7 @@ func TestPartitionKey(t *testing.T) {
 			Method: "not supported",
 		},
 	}
-	assert.Equal("", k.getPartitionKey(testPoint), "PartitionKey should be value of ''")
+	require.Equal(t, "", k.getPartitionKey(testPoint), "PartitionKey should be value of ''")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -78,7 +76,7 @@ func TestPartitionKey(t *testing.T) {
 			Method: "measurement",
 		},
 	}
-	assert.Equal(testPoint.Name(), k.getPartitionKey(testPoint), "PartitionKey should be value of measurement name")
+	require.Equal(t, testPoint.Name(), k.getPartitionKey(testPoint), "PartitionKey should be value of measurement name")
 
 	k = KinesisOutput{
 		Log: testutil.Logger{},
@@ -88,14 +86,14 @@ func TestPartitionKey(t *testing.T) {
 	}
 	partitionKey := k.getPartitionKey(testPoint)
 	u, err := uuid.FromString(partitionKey)
-	assert.Nil(err, "Issue parsing UUID")
-	assert.Equal(byte(4), u.Version(), "PartitionKey should be UUIDv4")
+	require.NoError(t, err, "Issue parsing UUID")
+	require.Equal(t, byte(4), u.Version(), "PartitionKey should be UUIDv4")
 
 	k = KinesisOutput{
 		Log:          testutil.Logger{},
 		PartitionKey: "-",
 	}
-	assert.Equal("-", k.getPartitionKey(testPoint), "PartitionKey should be '-'")
+	require.Equal(t, "-", k.getPartitionKey(testPoint), "PartitionKey should be '-'")
 
 	k = KinesisOutput{
 		Log:                testutil.Logger{},
@@ -103,14 +101,12 @@ func TestPartitionKey(t *testing.T) {
 	}
 	partitionKey = k.getPartitionKey(testPoint)
 	u, err = uuid.FromString(partitionKey)
-	assert.Nil(err, "Issue parsing UUID")
-	assert.Equal(byte(4), u.Version(), "PartitionKey should be UUIDv4")
+	require.NoError(t, err, "Issue parsing UUID")
+	require.Equal(t, byte(4), u.Version(), "PartitionKey should be UUIDv4")
 }
 
 func TestWriteKinesis_WhenSuccess(t *testing.T) {
-	assert := assert.New(t)
-
-	records := []*kinesis.PutRecordsRequestEntry{
+	records := []types.PutRecordsRequestEntry{
 		{
 			PartitionKey: aws.String(testPartitionKey),
 			Data:         []byte{0x65},
@@ -120,7 +116,7 @@ func TestWriteKinesis_WhenSuccess(t *testing.T) {
 	svc := &mockKinesisPutRecords{}
 	svc.SetupResponse(
 		0,
-		[]*kinesis.PutRecordsResultEntry{
+		[]types.PutRecordsResultEntry{
 			{
 				SequenceNumber: aws.String(testSequenceNumber),
 				ShardId:        aws.String(testShardID),
@@ -135,7 +131,7 @@ func TestWriteKinesis_WhenSuccess(t *testing.T) {
 	}
 
 	elapsed := k.writeKinesis(records)
-	assert.GreaterOrEqual(elapsed.Nanoseconds(), zero)
+	require.GreaterOrEqual(t, elapsed.Nanoseconds(), zero)
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -146,9 +142,7 @@ func TestWriteKinesis_WhenSuccess(t *testing.T) {
 }
 
 func TestWriteKinesis_WhenRecordErrors(t *testing.T) {
-	assert := assert.New(t)
-
-	records := []*kinesis.PutRecordsRequestEntry{
+	records := []types.PutRecordsRequestEntry{
 		{
 			PartitionKey: aws.String(testPartitionKey),
 			Data:         []byte{0x66},
@@ -158,7 +152,7 @@ func TestWriteKinesis_WhenRecordErrors(t *testing.T) {
 	svc := &mockKinesisPutRecords{}
 	svc.SetupResponse(
 		1,
-		[]*kinesis.PutRecordsResultEntry{
+		[]types.PutRecordsResultEntry{
 			{
 				ErrorCode:    aws.String("InternalFailure"),
 				ErrorMessage: aws.String("Internal Service Failure"),
@@ -173,7 +167,7 @@ func TestWriteKinesis_WhenRecordErrors(t *testing.T) {
 	}
 
 	elapsed := k.writeKinesis(records)
-	assert.GreaterOrEqual(elapsed.Nanoseconds(), zero)
+	require.GreaterOrEqual(t, elapsed.Nanoseconds(), zero)
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -184,18 +178,15 @@ func TestWriteKinesis_WhenRecordErrors(t *testing.T) {
 }
 
 func TestWriteKinesis_WhenServiceError(t *testing.T) {
-	assert := assert.New(t)
-
-	records := []*kinesis.PutRecordsRequestEntry{
+	records := []types.PutRecordsRequestEntry{
 		{
 			PartitionKey: aws.String(testPartitionKey),
-			Data:         []byte{},
 		},
 	}
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupErrorResponse(
-		awserr.New("InvalidArgumentException", "Invalid record", nil),
+		&types.InvalidArgumentException{Message: aws.String("Invalid record")},
 	)
 
 	k := KinesisOutput{
@@ -205,7 +196,7 @@ func TestWriteKinesis_WhenServiceError(t *testing.T) {
 	}
 
 	elapsed := k.writeKinesis(records)
-	assert.GreaterOrEqual(elapsed.Nanoseconds(), zero)
+	require.GreaterOrEqual(t, elapsed.Nanoseconds(), zero)
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -216,8 +207,9 @@ func TestWriteKinesis_WhenServiceError(t *testing.T) {
 }
 
 func TestWrite_NoMetrics(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
+
 	svc := &mockKinesisPutRecords{}
 
 	k := KinesisOutput{
@@ -231,15 +223,15 @@ func TestWrite_NoMetrics(t *testing.T) {
 		svc:        svc,
 	}
 
-	err := k.Write([]telegraf.Metric{})
-	assert.Nil(err, "Should not return error")
+	err := k.Write(nil)
+	require.NoError(t, err, "Should not return error")
 
-	svc.AssertRequests(t, []*kinesis.PutRecordsInput{})
+	svc.AssertRequests(t, make([]*kinesis.PutRecordsInput, 0))
 }
 
 func TestWrite_SingleMetric(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(1, 0)
@@ -257,12 +249,12 @@ func TestWrite_SingleMetric(t *testing.T) {
 
 	metric, metricData := createTestMetric(t, "metric1", serializer)
 	err := k.Write([]telegraf.Metric{metric})
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
 			StreamName: aws.String(testStreamName),
-			Records: []*kinesis.PutRecordsRequestEntry{
+			Records: []types.PutRecordsRequestEntry{
 				{
 					PartitionKey: aws.String(testPartitionKey),
 					Data:         metricData,
@@ -273,8 +265,8 @@ func TestWrite_SingleMetric(t *testing.T) {
 }
 
 func TestWrite_MultipleMetrics_SinglePartialRequest(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(3, 0)
@@ -292,7 +284,7 @@ func TestWrite_MultipleMetrics_SinglePartialRequest(t *testing.T) {
 
 	metrics, metricsData := createTestMetrics(t, 3, serializer)
 	err := k.Write(metrics)
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -305,8 +297,8 @@ func TestWrite_MultipleMetrics_SinglePartialRequest(t *testing.T) {
 }
 
 func TestWrite_MultipleMetrics_SingleFullRequest(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(maxRecordsPerRequest, 0)
@@ -324,7 +316,7 @@ func TestWrite_MultipleMetrics_SingleFullRequest(t *testing.T) {
 
 	metrics, metricsData := createTestMetrics(t, maxRecordsPerRequest, serializer)
 	err := k.Write(metrics)
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -337,8 +329,8 @@ func TestWrite_MultipleMetrics_SingleFullRequest(t *testing.T) {
 }
 
 func TestWrite_MultipleMetrics_MultipleRequests(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(maxRecordsPerRequest, 0)
@@ -357,7 +349,7 @@ func TestWrite_MultipleMetrics_MultipleRequests(t *testing.T) {
 
 	metrics, metricsData := createTestMetrics(t, maxRecordsPerRequest+1, serializer)
 	err := k.Write(metrics)
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -376,8 +368,8 @@ func TestWrite_MultipleMetrics_MultipleRequests(t *testing.T) {
 }
 
 func TestWrite_MultipleMetrics_MultipleFullRequests(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(maxRecordsPerRequest, 0)
@@ -396,7 +388,7 @@ func TestWrite_MultipleMetrics_MultipleFullRequests(t *testing.T) {
 
 	metrics, metricsData := createTestMetrics(t, maxRecordsPerRequest*2, serializer)
 	err := k.Write(metrics)
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
@@ -415,8 +407,8 @@ func TestWrite_MultipleMetrics_MultipleFullRequests(t *testing.T) {
 }
 
 func TestWrite_SerializerError(t *testing.T) {
-	assert := assert.New(t)
-	serializer := influx.NewSerializer()
+	serializer := &influx.Serializer{}
+	require.NoError(t, serializer.Init())
 
 	svc := &mockKinesisPutRecords{}
 	svc.SetupGenericResponse(2, 0)
@@ -443,13 +435,13 @@ func TestWrite_SerializerError(t *testing.T) {
 		invalidMetric,
 		metric2,
 	})
-	assert.Nil(err, "Should not return error")
+	require.NoError(t, err, "Should not return error")
 
 	// remaining valid metrics should still get written
 	svc.AssertRequests(t, []*kinesis.PutRecordsInput{
 		{
 			StreamName: aws.String(testStreamName),
-			Records: []*kinesis.PutRecordsRequestEntry{
+			Records: []types.PutRecordsRequestEntry{
 				{
 					PartitionKey: aws.String(testPartitionKey),
 					Data:         metric1Data,
@@ -469,46 +461,40 @@ type mockKinesisPutRecordsResponse struct {
 }
 
 type mockKinesisPutRecords struct {
-	kinesisiface.KinesisAPI
-
 	requests  []*kinesis.PutRecordsInput
 	responses []*mockKinesisPutRecordsResponse
 }
 
 func (m *mockKinesisPutRecords) SetupResponse(
-	failedRecordCount int64,
-	records []*kinesis.PutRecordsResultEntry,
+	failedRecordCount int32,
+	records []types.PutRecordsResultEntry,
 ) {
 	m.responses = append(m.responses, &mockKinesisPutRecordsResponse{
 		Err: nil,
 		Output: &kinesis.PutRecordsOutput{
-			FailedRecordCount: aws.Int64(failedRecordCount),
+			FailedRecordCount: aws.Int32(failedRecordCount),
 			Records:           records,
 		},
 	})
 }
 
-func (m *mockKinesisPutRecords) SetupGenericResponse(
-	successfulRecordCount uint32,
-	failedRecordCount uint32,
-) {
-	records := []*kinesis.PutRecordsResultEntry{}
-
+func (m *mockKinesisPutRecords) SetupGenericResponse(successfulRecordCount uint32, failedRecordCount int32) {
+	records := make([]types.PutRecordsResultEntry, 0, int32(successfulRecordCount)+failedRecordCount)
 	for i := uint32(0); i < successfulRecordCount; i++ {
-		records = append(records, &kinesis.PutRecordsResultEntry{
+		records = append(records, types.PutRecordsResultEntry{
 			SequenceNumber: aws.String(testSequenceNumber),
 			ShardId:        aws.String(testShardID),
 		})
 	}
 
-	for i := uint32(0); i < failedRecordCount; i++ {
-		records = append(records, &kinesis.PutRecordsResultEntry{
+	for i := int32(0); i < failedRecordCount; i++ {
+		records = append(records, types.PutRecordsResultEntry{
 			ErrorCode:    aws.String("InternalFailure"),
 			ErrorMessage: aws.String("Internal Service Failure"),
 		})
 	}
 
-	m.SetupResponse(int64(failedRecordCount), records)
+	m.SetupResponse(failedRecordCount, records)
 }
 
 func (m *mockKinesisPutRecords) SetupErrorResponse(err error) {
@@ -518,10 +504,10 @@ func (m *mockKinesisPutRecords) SetupErrorResponse(err error) {
 	})
 }
 
-func (m *mockKinesisPutRecords) PutRecords(input *kinesis.PutRecordsInput) (*kinesis.PutRecordsOutput, error) {
+func (m *mockKinesisPutRecords) PutRecords(_ context.Context, input *kinesis.PutRecordsInput, _ ...func(*kinesis.Options)) (*kinesis.PutRecordsOutput, error) {
 	reqNum := len(m.requests)
 	if reqNum > len(m.responses) {
-		return nil, fmt.Errorf("Response for request %+v not setup", reqNum)
+		return nil, fmt.Errorf("response for request %+v not setup", reqNum)
 	}
 
 	m.requests = append(m.requests, input)
@@ -579,11 +565,7 @@ func (m *mockKinesisPutRecords) AssertRequests(
 	}
 }
 
-func createTestMetric(
-	t *testing.T,
-	name string,
-	serializer serializers.Serializer,
-) (telegraf.Metric, []byte) {
+func createTestMetric(t *testing.T, name string, serializer telegraf.Serializer) (telegraf.Metric, []byte) {
 	metric := testutil.TestMetric(1, name)
 
 	data, err := serializer.Serialize(metric)
@@ -592,19 +574,15 @@ func createTestMetric(
 	return metric, data
 }
 
-func createTestMetrics(
-	t *testing.T,
-	count uint32,
-	serializer serializers.Serializer,
-) ([]telegraf.Metric, [][]byte) {
-	metrics := make([]telegraf.Metric, count)
-	metricsData := make([][]byte, count)
+func createTestMetrics(t *testing.T, count uint32, serializer telegraf.Serializer) ([]telegraf.Metric, [][]byte) {
+	metrics := make([]telegraf.Metric, 0, count)
+	metricsData := make([][]byte, 0, count)
 
 	for i := uint32(0); i < count; i++ {
 		name := fmt.Sprintf("metric%d", i)
 		metric, data := createTestMetric(t, name, serializer)
-		metrics[i] = metric
-		metricsData[i] = data
+		metrics = append(metrics, metric)
+		metricsData = append(metricsData, data)
 	}
 
 	return metrics, metricsData
@@ -612,15 +590,14 @@ func createTestMetrics(
 
 func createPutRecordsRequestEntries(
 	metricsData [][]byte,
-) []*kinesis.PutRecordsRequestEntry {
-	count := len(metricsData)
-	records := make([]*kinesis.PutRecordsRequestEntry, count)
+) []types.PutRecordsRequestEntry {
+	records := make([]types.PutRecordsRequestEntry, 0, len(metricsData))
 
-	for i := 0; i < count; i++ {
-		records[i] = &kinesis.PutRecordsRequestEntry{
+	for _, data := range metricsData {
+		records = append(records, types.PutRecordsRequestEntry{
 			PartitionKey: aws.String(testPartitionKey),
-			Data:         metricsData[i],
-		}
+			Data:         data,
+		})
 	}
 
 	return records

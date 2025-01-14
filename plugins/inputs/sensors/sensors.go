@@ -1,9 +1,10 @@
+//go:generate ../../../tools/readme_config_includer/generator
 //go:build linux
-// +build linux
 
 package sensors
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -18,6 +19,9 @@ import (
 	"github.com/influxdata/telegraf/plugins/inputs"
 )
 
+//go:embed sample.conf
+var sampleConfig string
+
 var (
 	execCommand    = exec.Command // execCommand is used to mock commands in tests.
 	numberRegp     = regexp.MustCompile("[0-9]+")
@@ -30,19 +34,28 @@ type Sensors struct {
 	path          string
 }
 
-func (*Sensors) Description() string {
-	return "Monitor sensors, requires lm-sensors package"
-}
+const cmd = "sensors"
 
 func (*Sensors) SampleConfig() string {
-	return `
-  ## Remove numbers from field names.
-  ## If true, a field name like 'temp1_input' will be changed to 'temp_input'.
-  # remove_numbers = true
+	return sampleConfig
+}
 
-  ## Timeout is the maximum amount of time that the sensors command can run.
-  # timeout = "5s"
-`
+func (s *Sensors) Init() error {
+	// Set defaults
+	if s.path == "" {
+		path, err := exec.LookPath(cmd)
+		if err != nil {
+			return fmt.Errorf("looking up %q failed: %w", cmd, err)
+		}
+		s.path = path
+	}
+
+	// Check parameters
+	if s.path == "" {
+		return fmt.Errorf("no path specified for %q", cmd)
+	}
+
+	return nil
 }
 
 func (s *Sensors) Gather(acc telegraf.Accumulator) error {
@@ -54,24 +67,26 @@ func (s *Sensors) Gather(acc telegraf.Accumulator) error {
 }
 
 // parse forks the command:
-//     sensors -u -A
+//
+//	sensors -u -A
+//
 // and parses the output to add it to the telegraf.Accumulator.
 func (s *Sensors) parse(acc telegraf.Accumulator) error {
-	tags := map[string]string{}
-	fields := map[string]interface{}{}
+	tags := make(map[string]string)
+	fields := make(map[string]interface{})
 	chip := ""
 	cmd := execCommand(s.path, "-A", "-u")
 	out, err := internal.StdOutputTimeout(cmd, time.Duration(s.Timeout))
 	if err != nil {
-		return fmt.Errorf("failed to run command %s: %s - %s", strings.Join(cmd.Args, " "), err, string(out))
+		return fmt.Errorf("failed to run command %q: %w - %s", strings.Join(cmd.Args, " "), err, string(out))
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for _, line := range lines {
 		if len(line) == 0 {
 			acc.AddFields("sensors", fields, tags)
 			chip = ""
-			tags = map[string]string{}
-			fields = map[string]interface{}{}
+			tags = make(map[string]string)
+			fields = make(map[string]interface{})
 			continue
 		}
 		if len(chip) == 0 {
@@ -83,7 +98,7 @@ func (s *Sensors) parse(acc telegraf.Accumulator) error {
 			if len(tags) > 1 {
 				acc.AddFields("sensors", fields, tags)
 			}
-			fields = map[string]interface{}{}
+			fields = make(map[string]interface{})
 			tags = map[string]string{
 				"chip":    chip,
 				"feature": strings.TrimRight(snake(line), ":"),
@@ -107,19 +122,14 @@ func (s *Sensors) parse(acc telegraf.Accumulator) error {
 
 // snake converts string to snake case
 func snake(input string) string {
-	return strings.ToLower(strings.Replace(strings.TrimSpace(input), " ", "_", -1))
+	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(input), " ", "_"))
 }
 
 func init() {
-	s := Sensors{
-		RemoveNumbers: true,
-		Timeout:       defaultTimeout,
-	}
-	path, _ := exec.LookPath("sensors")
-	if len(path) > 0 {
-		s.path = path
-	}
 	inputs.Add("sensors", func() telegraf.Input {
-		return &s
+		return &Sensors{
+			RemoveNumbers: true,
+			Timeout:       defaultTimeout,
+		}
 	})
 }
